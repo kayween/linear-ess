@@ -27,9 +27,11 @@ class EllipticalSliceSampler(object):
 
         self.one_to_batch = torch.arange(x.size(-2), dtype=torch.int64, device=x.device)
 
-        angles = self.intersection_angles(x @ A.T, z @ A.T, b.unsqueeze(-2))
+        self.angles = self.intersection_angles(x @ A.T, z @ A.T, b.unsqueeze(-2))
 
-        self.right_endpoints, self.left_endpoints = self.candidate_endpoints(angles)
+        self.right_endpoints, self.left_endpoints = self.candidate_endpoints(self.angles)
+        self.check_endpoints()
+
         self.csum = self.right_endpoints.sub(self.left_endpoints).clamp(min=0.).cumsum(dim=-1)
 
         # print("right endpoints\n", self.right_endpoints)
@@ -37,8 +39,21 @@ class EllipticalSliceSampler(object):
 
         # print("csum\n", self.csum)
 
+    def check_endpoints(self):
+        b, m = self.left_endpoints.size()
+
+        for i in range(self.left_endpoints.size(-2)):
+            for j in range(self.left_endpoints.size(-1)):
+                mid = 0.5 * (self.left_endpoints[i, j] + self.right_endpoints[i, j])
+                xx = lambda theta: self.x[i] * torch.cos(theta) + self.z[i] * torch.sin(theta)
+                if self.left_endpoints[i, j] <= self.right_endpoints[i, j]:
+                    assert (self.A @ xx(mid) + self.b).le(0.).all()
+                else:
+                    assert (self.A @ xx(mid) + self.b).lt(0.).any()
+
+
     def sample_angle(self):
-        u = self.csum[:, -1] * torch.rand(self.right_endpoints.size(-2))
+        u = self.csum[:, -1] * torch.rand(self.right_endpoints.size(-2), device=self.x.device)
         # print(u)
 
         idx = torch.searchsorted(self.csum, u.unsqueeze(-1)).squeeze(-1)
@@ -74,10 +89,10 @@ class EllipticalSliceSampler(object):
         theta1 = -1. * arccos + 2. * arctan
         theta2 = +1. * arccos + 2. * arctan
 
-        # theta1[~has_solution] = math.pi
-        # theta2[~has_solution] = math.pi
-        theta1 = theta1[:, has_solution.squeeze()]
-        theta2 = theta2[:, has_solution.squeeze()]
+        theta1[~has_solution] = math.pi
+        theta2[~has_solution] = math.pi
+        # theta1 = theta1[:, has_solution.squeeze()]
+        # theta2 = theta2[:, has_solution.squeeze()]
 
         # translate every angle to [0, 2 * pi]
         theta1 = theta1 + theta1.lt(0.) * 2. * math.pi
@@ -114,7 +129,7 @@ class TruncatedGaussianSampler(object):
         self.b = b
 
     def next(self, x):
-        z = torch.randn(x.size(-1))
+        z = torch.randn(x.size(), dtype=x.dtype, device=x.device)
 
         sampler = EllipticalSliceSampler(self.A, self.b, x, z)
 
@@ -123,31 +138,28 @@ class TruncatedGaussianSampler(object):
 
 
 if __name__ == "__main__":
+    device = "cuda:0"
+
     np.random.seed(0)
     torch.manual_seed(0)
 
     # domain is -1 <= x <= 3
-    A = torch.tensor([[-1.], [1.]])
-    b = torch.tensor([-1., -3.])
+    A = torch.tensor([[-1.], [1.]], device=device)
+    b = torch.tensor([-1., -3.], device=device)
 
-    x = torch.tensor([0.])
-    # x = torch.zeros(1, 1)
+    # x = torch.tensor([0.])
+    x = torch.zeros(200, 1, device=device)
 
     sampler = TruncatedGaussianSampler(A, b)
-
-    for i in range(1000):
-        x = sampler.next(x)
     
     samples = []
-    for i in range(50):
-        for j in range(100):
-            print("=== iter {:d} ===".format(j))
-            x = sampler.next(x)
+    for i in range(500):
+        print("=== iter {:d} ===".format(i))
+        x = sampler.next(x)
         samples.append(x)
 
-
-    # samples = x
-    samples = torch.cat(samples, dim=-2)
+    # samples = torch.cat(samples, dim=-2)
+    samples = x
     mean = samples.mean(dim=-2)
     std = samples.var(dim=-2)
 

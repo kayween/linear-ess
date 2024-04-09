@@ -42,12 +42,11 @@ class EllipticalSliceSampler(object):
         # print(u)
 
         idx = torch.searchsorted(self.csum, u.unsqueeze(-1)).squeeze(-1)
-        idx_gt_zero = idx > 0
+        is_gt_zero = idx > 0
 
-        increment = u
-        increment[idx_gt_zero] -= self.csum[idx_gt_zero, idx[idx_gt_zero] - 1]
+        u[is_gt_zero] -= self.csum[is_gt_zero, idx[is_gt_zero] - 1]
 
-        return self.left_endpoints[self.one_to_batch, idx] + increment
+        return self.left_endpoints[self.one_to_batch, idx] + u 
 
     def intersection_angles(self, p, q, r):
         """
@@ -65,7 +64,9 @@ class EllipticalSliceSampler(object):
             raise RuntimeError
 
         # It's impossible that the ratio < -1 if A @ x + b <= 0.
-        assert (-r / normalize).ge(-1).all()
+        assert r.neg().div(normalize).ge(-1).all()
+
+        has_solution = r.neg().div(normalize).lt(1.)
 
         arccos = torch.arccos(-1. * r / normalize)
         arctan = torch.arctan(q / (normalize + p))
@@ -73,8 +74,17 @@ class EllipticalSliceSampler(object):
         theta1 = -1. * arccos + 2. * arctan
         theta2 = +1. * arccos + 2. * arctan
 
-        # print(theta1)
-        # print(theta2)
+        # theta1[~has_solution] = math.pi
+        # theta2[~has_solution] = math.pi
+        theta1 = theta1[:, has_solution.squeeze()]
+        theta2 = theta2[:, has_solution.squeeze()]
+
+        # translate every angle to [0, 2 * pi]
+        theta1 = theta1 + theta1.lt(0.) * 2. * math.pi
+        theta2 = theta2 + theta2.lt(0.) * 2. * math.pi
+
+        theta1, theta2 = torch.minimum(theta1, theta2), torch.maximum(theta1, theta2)
+
         return theta1, theta2
 
     def candidate_endpoints(self, angles):
@@ -88,20 +98,6 @@ class EllipticalSliceSampler(object):
             candidate endpoints
         """
         theta1, theta2 = angles
-
-        if not torch.equal(theta1.isnan(), theta2.isnan()):
-            raise RuntimeError
-
-        is_nan = theta1.isnan()
-
-        theta1[is_nan] = math.pi
-        theta2[is_nan] = math.pi
-
-        # translate every angle to [0, 2 * pi]
-        theta1 = theta1 + theta1.lt(0.) * 2. * math.pi
-        theta2 = theta2 + theta2.lt(0.) * 2. * math.pi
-
-        theta1, theta2 = torch.minimum(theta1, theta2), torch.maximum(theta1, theta2)
 
         srted, indices = torch.sort(theta1, descending=False)
         cummax = theta2[self.one_to_batch.unsqueeze(-1), indices].cummax(dim=-1).values
@@ -134,16 +130,24 @@ if __name__ == "__main__":
     A = torch.tensor([[-1.], [1.]])
     b = torch.tensor([-1., -3.])
 
-    # x = torch.tensor([0.])
-    x = torch.zeros(1, 1)
+    x = torch.tensor([0.])
+    # x = torch.zeros(1, 1)
 
     sampler = TruncatedGaussianSampler(A, b)
 
-    for j in range(200):
-        # print("=== iter {:d} ===".format(j))
+    for i in range(1000):
         x = sampler.next(x)
+    
+    samples = []
+    for i in range(50):
+        for j in range(100):
+            print("=== iter {:d} ===".format(j))
+            x = sampler.next(x)
+        samples.append(x)
 
-    samples = x
+
+    # samples = x
+    samples = torch.cat(samples, dim=-2)
     mean = samples.mean(dim=-2)
     std = samples.var(dim=-2)
 

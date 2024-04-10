@@ -46,7 +46,7 @@ class EllipticalSliceSampler(object):
 
         u[is_gt_zero] -= self.csum[is_gt_zero, idx[is_gt_zero] - 1]
 
-        return self.left[self.one_to_batch, idx] + u 
+        return self.left[self.one_to_batch, idx] + u
 
     def sample_slice(self):
         theta = self.sample_angle()
@@ -131,16 +131,25 @@ if __name__ == "__main__":
     torch.manual_seed(0)
 
     # domain is -1 <= x <= 3
-    A = torch.tensor([[-1.], [1.]], device=device)
-    b = torch.tensor([-1., -3.], device=device)
+    # A = torch.tensor([[-1.], [1.]], device=device)
+    # b = torch.tensor([-1., -3.], device=device)
+    # x = torch.zeros(1000, 1, device=device)
 
-    x = torch.zeros(400, 1, device=device)
+    m = 20
+    d = 10
+
+    A = torch.rand(m, d, device=device)
+    x = torch.randn(d, device=device)
+
+    b = -A @ x - torch.rand(m, device=device)
 
     sampler = TruncatedGaussianSampler(A, b)
-    
+
     for i in range(500):
         # print("=== iter {:d} ===".format(i))
         x = sampler.next(x)
+
+    print("finish sampling")
 
     samples = x
     mean = samples.mean(dim=-2)
@@ -152,13 +161,16 @@ if __name__ == "__main__":
     mean, var = truncnorm.stats(-1, 3)
     print(mean, var)
 
+    # samples = samples.squeeze()
+
+    # print(samples.max())
     # import matplotlib.pyplot as plt
-    # plt.hist(samples.tolist(), density=True, bins=20)
-    # # plt.hist(samples.tolist(), cumulative=True, density=True, bins=20)
+    # # plt.hist(samples.tolist(), density=True, bins='auto')
+    # plt.hist(samples.tolist(), cumulative=True, density=True, bins='auto')
 
     # xx = np.linspace(-1, 3.)
-    # # plt.plot(xx, truncnorm.cdf(xx, -1, 3), label='truncated Gaussian CDF')
-    # plt.plot(xx, truncnorm.pdf(xx, -1, 3), label='truncated Gaussian PDF')
+    # # plt.plot(xx, truncnorm.pdf(xx, -1, 3), label='truncated Gaussian PDF')
+    # plt.plot(xx, truncnorm.cdf(xx, -1, 3), label='truncated Gaussian CDF')
     # plt.legend()
 
     # # plt.title('cumulative histogram of MCMC samples')

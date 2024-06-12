@@ -22,15 +22,15 @@ class EllipticalSliceSampler(object):
         self.x = x = x.unsqueeze(-2) if x.dim() == 1 else x
         self.z = z = z.unsqueeze(-2) if z.dim() == 1 else z
 
-        if (x @ A.T + b).gt(0.).any():
+        if (x @ A.T - b).gt(0.).any():
+            import ipdb; ipdb.set_trace()
             raise RuntimeError
 
         self.one_to_batch = torch.arange(x.size(-2), dtype=torch.int64, device=x.device)
 
-        self.angles = self.intersection_angles(x @ A.T, z @ A.T, b.unsqueeze(-2))
+        alpha, beta = self.intersection_angles(x @ A.T, z @ A.T, b.unsqueeze(-2))
 
-        self.left, self.right = self.candidate_endpoints(self.angles)
-        # self.check_endpoints()
+        self.left, self.right = self.find_active_slices(alpha, beta)
 
         self.csum = self.right.sub(self.left).clamp(min=0.).cumsum(dim=-1)
 
@@ -53,62 +53,75 @@ class EllipticalSliceSampler(object):
         point = self.x * torch.cos(theta).unsqueeze(-1) + self.z * torch.sin(theta).unsqueeze(-1)
         return point.squeeze(dim=-2)
 
-    def intersection_angles(self, p, q, r):
+    def intersection_angles(self, p, q, bias):
         """
         Solve the trigonometry inequalities
-            p * cos(theta) + q * sin(theta) + r <= 0.
+            p * cos(theta) + q * sin(theta) <= b.
 
         Args:
             p (tensor): of size (batch, m)
             q (tensor): of size (batch, m)
-            r (tensor): broadcastable with p and q
+            b (tensor): broadcastable with p and q
         """
-        normalize = torch.sqrt(p ** 2 + q ** 2)
+        radius = torch.sqrt(p ** 2 + q ** 2)
 
-        if normalize.abs().lt(1e-10).any():
+        if radius.abs().lt(1e-10).any():
             raise RuntimeError
 
-        # It's impossible that the ratio < -1 if A @ x + b <= 0.
-        assert r.neg().div(normalize).ge(-1).all()
+        # It's impossible that the ratio < -1 if A @ x <= b.
+        assert bias.div(radius).ge(-1).all()
 
-        has_solution = r.neg().div(normalize).lt(1.)
+        if bias.div(radius).min().le(-1 + 1e-5):
+            import ipdb; ipdb.set_trace()
 
-        arccos = torch.arccos(-1. * r / normalize)
-        arctan = torch.arctan(q / (normalize + p))
+        has_solution = bias.div(radius).lt(1.)
+
+        arccos = torch.arccos(bias / radius)
+        arctan = torch.arctan(q / (radius + p))
 
         theta1 = -1. * arccos + 2. * arctan
         theta2 = +1. * arccos + 2. * arctan
 
-        theta1[~has_solution] = math.pi
-        theta2[~has_solution] = math.pi
+        theta1[~has_solution] = 0.
+        theta2[~has_solution] = 0.
 
         # translate every angle to [0, 2 * pi]
         theta1 = theta1 + theta1.lt(0.) * 2. * math.pi
         theta2 = theta2 + theta2.lt(0.) * 2. * math.pi
 
-        theta1, theta2 = torch.minimum(theta1, theta2), torch.maximum(theta1, theta2)
+        alpha, beta = torch.minimum(theta1, theta2), torch.maximum(theta1, theta2)
 
-        return theta1, theta2
+        # return alpha, beta 
+        alpha = alpha - torch.minimum(alpha * 0.01, torch.ones_like(alpha) * 1e-6)
+        beta = beta + torch.minimum((2 * math.pi - beta) * 0.01, torch.ones_like(beta) * 1e-6)
 
-    def candidate_endpoints(self, angles):
+        return alpha, beta
+
+    def find_active_slices(self, alpha, beta):
         """
         Construct endpoints of active elliptical slices from intersection angles.
 
         Args:
-            angles (tuple): angles[0] and angles[1] are intersection angles of size (batch, m)
+            alpha: A tensor of size (batch, m) representing the smaller intersection angles
+            beta: A tensor of size (batch, m) representing the larger intersection angles
 
         Return:
-            candidate endpoints
+            A tuple (left, right) of tensors representing the active slices. Both tensors are of size (batch, m + 1).
+            For the i-th batch and the j-th constraint, the interval from left[i, j] to right[i, j]
+            is an active slice if and only if left[i, j] <= right[i, j].
         """
-        theta1, theta2 = angles
+        batch = alpha.size(-2)
 
-        srted, indices = torch.sort(theta1, descending=False)
-        cummax = theta2[self.one_to_batch.unsqueeze(-1), indices].cummax(dim=-1).values
+        ones = alpha.new_ones((batch, 1))
+        zeros = beta.new_zeros((batch, 1))
 
-        return (
-            torch.cat([cummax.new_zeros(cummax.size(-2), 1), cummax], dim=-1),
-            torch.cat([srted, srted.new_ones(srted.size(-2), 1) * 2 * math.pi], dim=-1),
-        )
+        srted, indices = torch.sort(alpha, descending=False)
+        cummax = beta[self.one_to_batch.unsqueeze(-1), indices].cummax(dim=-1).values
+
+        srted = torch.cat([srted, ones * 2 * math.pi], dim=-1)
+        cummax = torch.cat([zeros, cummax], dim=-1)
+ 
+        return cummax, srted
 
 
 class TruncatedGaussianSampler(object):
@@ -117,9 +130,9 @@ class TruncatedGaussianSampler(object):
         self.b = b
 
     def next(self, x):
-        z = torch.randn(x.size(), dtype=x.dtype, device=x.device)
+        nu = torch.randn(x.size(), dtype=x.dtype, device=x.device)
 
-        sampler = EllipticalSliceSampler(self.A, self.b, x, z)
+        sampler = EllipticalSliceSampler(self.A, self.b, x, nu)
 
         return sampler.sample_slice()
 
@@ -127,26 +140,32 @@ class TruncatedGaussianSampler(object):
 if __name__ == "__main__":
     device = "cuda:0"
 
+    # torch.set_default_dtype(torch.float64)
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cudnn.allow_tf32 = False
+
     np.random.seed(0)
     torch.manual_seed(0)
 
     # domain is -1 <= x <= 3
-    # A = torch.tensor([[-1.], [1.]], device=device)
-    # b = torch.tensor([-1., -3.], device=device)
-    # x = torch.zeros(1000, 1, device=device)
+    A = torch.tensor([[-1.], [1.]], device=device)
+    b = torch.tensor([1., 3.], device=device)
+    x = torch.zeros(10000, 1, device=device)
 
-    m = 20
-    d = 10
+    # m = 20
+    # d = 10
 
-    A = torch.rand(m, d, device=device)
-    x = torch.randn(d, device=device)
+    # A = torch.rand(m, d, device=device)
+    # x = torch.randn(d, device=device)
 
-    b = -A @ x - torch.rand(m, device=device)
+    # b = A @ x + torch.rand(m, device=device)
 
     sampler = TruncatedGaussianSampler(A, b)
 
-    for i in range(500):
-        # print("=== iter {:d} ===".format(i))
+    for i in range(2000):
+        print("=== iter {:d} ===".format(i))
+        if i == 1424:
+            import ipdb; ipdb.set_trace()
         x = sampler.next(x)
 
     print("finish sampling")

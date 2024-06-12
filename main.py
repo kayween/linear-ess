@@ -31,11 +31,11 @@ class EllipticalSliceSampler(object):
         batch = x.size(-2)
         self.zeros = x.new_zeros((batch, 1))
         self.ones = x.new_ones((batch, 1))
-        self.one_to_batch = torch.arange(batch, dtype=torch.int64, device=x.device)
+        self.indices_batch = torch.arange(batch, dtype=torch.int64, device=x.device)
 
         alpha, beta = self.intersection_angles(x @ A.T, z @ A.T, b.unsqueeze(-2))
 
-        self.left, self.right = self.find_active_slices(alpha, beta)
+        self.left, self.right = self.active_angles(alpha, beta)
 
         self.csum = self.right.sub(self.left).clamp(min=0.).cumsum(dim=-1)
 
@@ -48,7 +48,7 @@ class EllipticalSliceSampler(object):
         # Do a zero padding so that padded_csum[i] = csum[i - 1]
         padded_csum = torch.cat([self.zeros, self.csum], dim=-1)
 
-        return u - padded_csum[self.one_to_batch, idx] + self.left[self.one_to_batch, idx]
+        return u - padded_csum[self.indices_batch, idx] + self.left[self.indices_batch, idx]
 
     def sample_slice(self):
         theta = self.sample_angle()
@@ -101,7 +101,7 @@ class EllipticalSliceSampler(object):
 
         return alpha, beta
 
-    def find_active_slices(self, alpha, beta):
+    def active_angles(self, alpha, beta):
         """
         Construct endpoints of active elliptical slices from intersection angles.
 
@@ -115,7 +115,7 @@ class EllipticalSliceSampler(object):
             is an active slice if and only if left[i, j] <= right[i, j].
         """
         srted, indices = torch.sort(alpha, descending=False)
-        cummax = beta[self.one_to_batch.unsqueeze(-1), indices].cummax(dim=-1).values
+        cummax = beta[self.indices_batch.unsqueeze(-1), indices].cummax(dim=-1).values
 
         srted = torch.cat([srted, self.ones * 2 * math.pi], dim=-1)
         cummax = torch.cat([self.zeros, cummax], dim=-1)

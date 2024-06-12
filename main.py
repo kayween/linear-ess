@@ -3,6 +3,8 @@ import math
 import numpy as np
 import torch
 
+import warnings
+
 
 class EllipticalSliceSampler(object):
     def __init__(self, A, b, x, z):
@@ -23,7 +25,6 @@ class EllipticalSliceSampler(object):
         self.z = z = z.unsqueeze(-2) if z.dim() == 1 else z
 
         if (x @ A.T - b).gt(0.).any():
-            import ipdb; ipdb.set_trace()
             raise RuntimeError
 
         self.one_to_batch = torch.arange(x.size(-2), dtype=torch.int64, device=x.device)
@@ -33,10 +34,6 @@ class EllipticalSliceSampler(object):
         self.left, self.right = self.find_active_slices(alpha, beta)
 
         self.csum = self.right.sub(self.left).clamp(min=0.).cumsum(dim=-1)
-
-        # print("left  endpoints\n", self.left)
-        # print("right endpoints\n", self.right)
-        # print("csum\n", self.csum)
 
     def sample_angle(self):
         u = self.csum[:, -1] * torch.rand(self.right.size(-2), device=self.x.device)
@@ -71,8 +68,10 @@ class EllipticalSliceSampler(object):
         # It's impossible that the ratio < -1 if A @ x <= b.
         assert bias.div(radius).ge(-1).all()
 
-        if bias.div(radius).min().le(-1 + 1e-5):
-            import ipdb; ipdb.set_trace()
+        if bias.div(radius).min().le(-1 + 1e-6):
+            warnings.warn(
+                "The ellipse is almost outside the constraint. This may cause numerical issues."
+            )
 
         has_solution = bias.div(radius).lt(1.)
 
@@ -92,8 +91,8 @@ class EllipticalSliceSampler(object):
         alpha, beta = torch.minimum(theta1, theta2), torch.maximum(theta1, theta2)
 
         # return alpha, beta 
-        alpha = alpha - torch.minimum(alpha * 0.01, torch.ones_like(alpha) * 1e-6)
-        beta = beta + torch.minimum((2 * math.pi - beta) * 0.01, torch.ones_like(beta) * 1e-6)
+        alpha = alpha - torch.minimum(alpha * 0.01, torch.ones_like(alpha) * 1e-5)
+        beta = beta + torch.minimum((2 * math.pi - beta) * 0.01, torch.ones_like(beta) * 1e-5)
 
         return alpha, beta
 
@@ -164,7 +163,7 @@ if __name__ == "__main__":
 
     for i in range(2000):
         print("=== iter {:d} ===".format(i))
-        if i == 1424:
+        if i == 756:
             import ipdb; ipdb.set_trace()
         x = sampler.next(x)
 

@@ -27,7 +27,11 @@ class EllipticalSliceSampler(object):
         if (x @ A.T - b).gt(0.).any():
             raise RuntimeError
 
-        self.one_to_batch = torch.arange(x.size(-2), dtype=torch.int64, device=x.device)
+        # Some common tensors that will be used more than once
+        batch = x.size(-2)
+        self.zeros = x.new_zeros((batch, 1))
+        self.ones = x.new_ones((batch, 1))
+        self.one_to_batch = torch.arange(batch, dtype=torch.int64, device=x.device)
 
         alpha, beta = self.intersection_angles(x @ A.T, z @ A.T, b.unsqueeze(-2))
 
@@ -38,12 +42,13 @@ class EllipticalSliceSampler(object):
     def sample_angle(self):
         u = self.csum[:, -1] * torch.rand(self.right.size(-2), device=self.x.device)
 
+        # The returned index i satisfies self.csum[i - 1] < u <= self.csum[i]
         idx = torch.searchsorted(self.csum, u.unsqueeze(-1)).squeeze(-1)
-        is_gt_zero = idx > 0
 
-        u[is_gt_zero] -= self.csum[is_gt_zero, idx[is_gt_zero] - 1]
+        # Do a zero padding so that padded_csum[i] = csum[i - 1]
+        padded_csum = torch.cat([self.zeros, self.csum], dim=-1)
 
-        return self.left[self.one_to_batch, idx] + u
+        return u - padded_csum[self.one_to_batch, idx] + self.left[self.one_to_batch, idx]
 
     def sample_slice(self):
         theta = self.sample_angle()
@@ -109,16 +114,11 @@ class EllipticalSliceSampler(object):
             For the i-th batch and the j-th constraint, the interval from left[i, j] to right[i, j]
             is an active slice if and only if left[i, j] <= right[i, j].
         """
-        batch = alpha.size(-2)
-
-        ones = alpha.new_ones((batch, 1))
-        zeros = beta.new_zeros((batch, 1))
-
         srted, indices = torch.sort(alpha, descending=False)
         cummax = beta[self.one_to_batch.unsqueeze(-1), indices].cummax(dim=-1).values
 
-        srted = torch.cat([srted, ones * 2 * math.pi], dim=-1)
-        cummax = torch.cat([zeros, cummax], dim=-1)
+        srted = torch.cat([srted, self.ones * 2 * math.pi], dim=-1)
+        cummax = torch.cat([self.zeros, cummax], dim=-1)
  
         return cummax, srted
 

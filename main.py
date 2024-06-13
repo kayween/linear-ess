@@ -5,6 +5,8 @@ import torch
 
 import warnings
 
+import time
+
 
 class EllipticalSliceSampler(object):
     def __init__(self, A, b, x, z):
@@ -34,21 +36,57 @@ class EllipticalSliceSampler(object):
         self.indices_batch = torch.arange(batch, dtype=torch.int64, device=x.device)
 
         alpha, beta = self.intersection_angles(x @ A.T, z @ A.T, b.unsqueeze(-2))
+        # alpha, beta = self.intersection_angles(
+        #     (x @ A.T).to(torch.float64),
+        #     (z @ A.T).to(torch.float64),
+        #     b.unsqueeze(-2).to(torch.float64),
+        # )
 
-        self.left, self.right = self.active_angles(alpha, beta)
+        left, right = self.active_angles(alpha, beta)
+        # self.left = self.left.to(torch.float64)
+        # self.right = self.right.to(torch.float64)
 
+        self.left, self.right = self.postprocess_active_angles(left, right)
+
+        # self.csum = self.right.sub(self.left).clamp(min=0.).to(torch.float64).cumsum(dim=-1)
         self.csum = self.right.sub(self.left).clamp(min=0.).cumsum(dim=-1)
 
+    def postprocess_active_angles(self, left, right):
+        gap = torch.clamp(right - left, min=0.)
+
+        epsilon = torch.tensor(1e-6, dtype=left.dtype, device=left.device)
+        epsilon = torch.minimum(gap * 0.25, epsilon)
+
+        left = left + epsilon
+        right = right - epsilon
+
+        # return left.to(torch.float64), right.to(torch.float64)
+        return left, right
+
     def sample_angle(self):
+        # u = self.csum[:, -1] * torch.rand(self.right.size(-2), dtype=torch.float64, device=self.x.device)
         u = self.csum[:, -1] * torch.rand(self.right.size(-2), device=self.x.device)
 
         # The returned index i satisfies self.csum[i - 1] < u <= self.csum[i]
         idx = torch.searchsorted(self.csum, u.unsqueeze(-1)).squeeze(-1)
 
         # Do a zero padding so that padded_csum[i] = csum[i - 1]
+        # padded_csum = torch.cat([self.zeros.to(torch.float64), self.csum], dim=-1)
         padded_csum = torch.cat([self.zeros, self.csum], dim=-1)
 
-        return u - padded_csum[self.indices_batch, idx] + self.left[self.indices_batch, idx]
+        theta = u - padded_csum[self.indices_batch, idx] + self.left[self.indices_batch, idx]
+
+        # def check_feasibility(theta):
+        #     point = self.x * torch.cos(theta).unsqueeze(-1) + self.z * torch.sin(theta).unsqueeze(-1)
+        #     if torch.max(point @ A.T - b).gt(0.).any():
+        #         print("fuck")
+        #         import ipdb; ipdb.set_trace()
+
+        # check_feasibility(theta.to(self.b.dtype))
+
+        return theta.to(self.b.dtype)
+        # return ret
+        # return ret
 
     def sample_slice(self):
         theta = self.sample_angle()
@@ -82,6 +120,10 @@ class EllipticalSliceSampler(object):
 
         arccos = torch.arccos(bias / radius)
         arctan = torch.arctan(q / (radius + p))
+
+        # In extreme cases, arctan has NaN because the denominator (radius + p) is zero.
+        # If this happens, q has to be zero and thus we rewrite arctan as zero.
+        arctan[arctan.isnan().nonzero(as_tuple=True)] = 0.
 
         theta1 = -1. * arccos + 2. * arctan
         theta2 = +1. * arccos + 2. * arctan
@@ -128,18 +170,28 @@ class TruncatedGaussianSampler(object):
         self.A = A
         self.b = b
 
+        self.cnt_warnings = 0
+
     def next(self, x):
         nu = torch.randn(x.size(), dtype=x.dtype, device=x.device)
 
         sampler = EllipticalSliceSampler(self.A, self.b, x, nu)
 
-        return sampler.sample_slice()
+        new_x =  sampler.sample_slice()
+
+        if torch.max(new_x @ A.T - b).max().ge(0.):
+            warnings.warn("sample violates the constraint")
+            self.cnt_warnings += 1
+
+            new_x = x
+
+        return new_x
 
 
 if __name__ == "__main__":
     device = "cuda:0"
 
-    # torch.set_default_dtype(torch.float64)
+    torch.set_default_dtype(torch.float64)
     torch.backends.cuda.matmul.allow_tf32 = False
     torch.backends.cudnn.allow_tf32 = False
 
@@ -154,19 +206,23 @@ if __name__ == "__main__":
     # m = 20
     # d = 10
 
-    # A = torch.rand(m, d, device=device)
-    # x = torch.randn(d, device=device)
+    # A = torch.randn(m, d, device=device)
+    # x = torch.randn(1000, d, device=device)
 
-    # b = A @ x + torch.rand(m, device=device)
+    # prod = x @ A.T
+    # b = prod.max(dim=-2).values + torch.rand(m, device=device)
 
     sampler = TruncatedGaussianSampler(A, b)
 
-    for i in range(2000):
-        print("=== iter {:d} ===".format(i))
-        if i == 756:
-            import ipdb; ipdb.set_trace()
+    start = time.time()
+    for i in range(10000):
+        # print("=== iter {:d} ===".format(i))
+        # if i == 1400:
+        #     # print(time.time() - start)
+        #     break
         x = sampler.next(x)
 
+    print(sampler.cnt_warnings)
     print("finish sampling")
 
     samples = x

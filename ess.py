@@ -191,7 +191,7 @@ class TruncatedGaussianSampler(object):
 if __name__ == "__main__":
     device = "cuda:0"
 
-    torch.set_default_dtype(torch.float64)
+    # torch.set_default_dtype(torch.float64)
     torch.backends.cuda.matmul.allow_tf32 = False
     torch.backends.cudnn.allow_tf32 = False
 

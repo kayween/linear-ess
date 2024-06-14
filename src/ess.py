@@ -215,7 +215,7 @@ if __name__ == "__main__":
     sampler = TruncatedGaussianSampler(A, b)
 
     start = time.time()
-    for i in range(10000):
+    for i in range(1000):
         # print("=== iter {:d} ===".format(i))
         # if i == 1400:
         #     # print(time.time() - start)
@@ -224,6 +224,7 @@ if __name__ == "__main__":
 
     print(sampler.cnt_warnings)
     print("finish sampling")
+    print(time.time() - start)
 
     samples = x
     mean = samples.mean(dim=-2)

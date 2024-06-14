@@ -60,11 +60,6 @@ class EllipticalSliceSampler(object):
 
         return u - padded_csum[self.indices_batch, idx] + left[self.indices_batch, idx]
 
-    def sample_slice(self):
-        theta = self.sample_angle()
-        point = self.x * torch.cos(theta).unsqueeze(-1) + self.z * torch.sin(theta).unsqueeze(-1)
-        return point.squeeze(dim=-2)
-
     def intersection_angles(self, p, q, bias):
         """
         Solve the trigonometry inequalities

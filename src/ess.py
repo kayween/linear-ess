@@ -130,6 +130,8 @@ class EllipticalSliceSampler(object):
         Do one step elliptical slice sampling. Fall back to previous state if the samples violate the constraint.
         Each iteration has three matrix-vector multiplications. Can be reduced to two if caching A @ x.
         """
+        self.total_iterations += 1
+
         nu = torch.randn(x.size(), dtype=x.dtype, device=x.device)
 
         alpha, beta = self.intersection_angles(x @ self.A.T, nu @ self.A.T, self.b.unsqueeze(-2))

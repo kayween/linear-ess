@@ -141,11 +141,12 @@ class EllipticalSliceSampler(object):
         theta = self.draw_angles(left, right).unsqueeze(-1)
         candidate = x * torch.cos(theta) + nu * torch.sin(theta)
 
-        if torch.max(candidate @ self.A.T - self.b).ge(0.):
-            warnings.warn("Fall back to previous iteration because some constraints are violated.")
-            self.cnt_violations += 1
-        else:
-            x = candidate
+        is_feasible = (candidate @ self.A.T - self.b).lt(0.).all(dim=-1)
+        x[is_feasible] = candidate[is_feasible]
+
+        if not is_feasible.all() > 0:
+            warnings.warn("Some Markov chains fall back to previous state due to constraint violations.")
+            self.cnt_violations += torch.sum(~is_feasible)
 
         return x
 

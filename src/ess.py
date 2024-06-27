@@ -62,13 +62,13 @@ class EllipticalSliceSampler(object):
 
     def intersection_angles(self, p, q, bias):
         """
-        Solve the trigonometry inequalities
-            p * cos(theta) + q * sin(theta) <= b.
+        Solve the trigonometry equation
+            p * cos(theta) + q * sin(theta) <= bias
 
         Args:
             p (tensor): of size (batch, m)
             q (tensor): of size (batch, m)
-            b (tensor): broadcastable with p and q
+            bias (tensor): broadcastable with p and q
         """
         radius = torch.sqrt(p ** 2 + q ** 2)
 
@@ -83,24 +83,19 @@ class EllipticalSliceSampler(object):
 
         has_solution = bias.div(radius).lt(1.)
 
-        arccos = torch.arccos(bias / radius)
-        arctan = torch.arctan(q / (radius + p))
-
-        # In extreme cases, arctan has NaN because the denominator (radius + p) is zero.
-        # If this happens, q has to be zero and thus we rewrite arctan as zero.
-        arctan[arctan.isnan().nonzero(as_tuple=True)] = 0.
-
-        theta1 = -1. * arccos + 2. * arctan
-        theta2 = +1. * arccos + 2. * arctan
+        sqrt = torch.sqrt(radius ** 2 - bias ** 2)
+        theta1 = 2 * torch.arctan2(q - sqrt, bias + p)
+        theta2 = 2 * torch.arctan2(q + sqrt, bias + p)
 
         theta1[~has_solution] = 0.
         theta2[~has_solution] = 0.
 
         # translate every angle to [0, 2 * pi]
-        theta1 = theta1 + theta1.lt(0.) * 2. * math.pi
-        theta2 = theta2 + theta2.lt(0.) * 2. * math.pi
+        theta1 = theta1 + theta1.lt(0.) * (2. * math.pi)
+        theta2 = theta2 + theta2.lt(0.) * (2. * math.pi)
 
-        alpha, beta = torch.minimum(theta1, theta2), torch.maximum(theta1, theta2)
+        alpha = torch.minimum(theta1, theta2)
+        beta = torch.maximum(theta1, theta2)
 
         return alpha, beta
 

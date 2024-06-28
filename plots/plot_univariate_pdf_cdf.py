@@ -12,8 +12,9 @@ if __name__ == "__main__":
 
     torch.manual_seed(0)
 
-    lb, ub = -1, 3
+    # lb, ub = -1, 3
     # lb, ub = 6, 7
+    lb, ub = 15, 17
 
     # domain is lb <= x <= ub
     A = torch.tensor([[-1.], [1.]], device=device)

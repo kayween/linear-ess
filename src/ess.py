@@ -71,24 +71,21 @@ class EllipticalSliceSampler(object):
             bias (tensor): broadcastable with p and q
         """
         radius = torch.sqrt(p ** 2 + q ** 2)
-
         if radius.abs().lt(1e-6).any():
             warnings.warn("The ellipse has an extremely small volume. This may cause numerical issues.")
 
-        # It's impossible that the ratio < -1 if A @ x <= b.
-        assert bias.div(radius).ge(-1).all()
-
-        if bias.div(radius).min().le(-1 + 1e-6):
+        ratio = bias / radius
+        if ratio.min().le(-1. + 1e-6):
             warnings.warn("The ellipse is almost outside the domain. This may cause numerical issues.")
 
-        has_solution = bias.div(radius).lt(1.)
+        has_solution = ratio < 1.
 
-        sqrt = torch.sqrt(radius ** 2 - bias ** 2)
-        theta1 = 2 * torch.arctan2(q - sqrt, bias + p)
-        theta2 = 2 * torch.arctan2(q + sqrt, bias + p)
+        arccos = torch.arccos(ratio)
+        arccos[~has_solution] = 0.
+        arctan = torch.arctan2(q, p)
 
-        theta1[~has_solution] = 0.
-        theta2[~has_solution] = 0.
+        theta1 = arctan + arccos
+        theta2 = arctan - arccos 
 
         # translate every angle to [0, 2 * pi]
         theta1 = theta1 + theta1.lt(0.) * (2. * math.pi)

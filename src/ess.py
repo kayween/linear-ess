@@ -85,7 +85,7 @@ class EllipticalSliceSampler(object):
         arctan = torch.arctan2(q, p)
 
         theta1 = arctan + arccos
-        theta2 = arctan - arccos 
+        theta2 = arctan - arccos
 
         # translate every angle to [0, 2 * pi]
         theta1 = theta1 + theta1.lt(0.) * (2. * math.pi)

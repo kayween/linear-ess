@@ -13,8 +13,7 @@ if __name__ == "__main__":
     torch.manual_seed(0)
 
     # lb, ub = -1, 3
-    # lb, ub = 6, 7
-    lb, ub = 15, 17
+    lb, ub = 15, 16
 
     # domain is lb <= x <= ub
     A = torch.tensor([[-1.], [1.]], device=device)
@@ -45,12 +44,12 @@ if __name__ == "__main__":
     xx = np.linspace(lb, ub)
     samples = samples.squeeze()
 
-    plt.figure(figsize=(4, 3))
+    plt.figure(figsize=(2.5, 2))
     plt.hist(samples.tolist(), density=True, bins='auto')
     plt.plot(xx, truncnorm.pdf(xx, lb, ub), label='ground truth PDF')
-    plt.title('density histogram of MCMC samples')
+    plt.title('density histogram')
     plt.legend()
-    plt.tight_layout()
+    plt.tight_layout(pad=0)
     plt.show()
 
     plt.figure(figsize=(4, 3))
@@ -58,5 +57,5 @@ if __name__ == "__main__":
     plt.plot(xx, truncnorm.cdf(xx, lb, ub), label='ground truth CDF')
     plt.title('cumulative histogram of MCMC samples')
     plt.legend()
-    plt.tight_layout()
+    plt.tight_layout(pad=0)
     plt.show()

@@ -1,5 +1,5 @@
 import torch
-from ess import EllipticalSliceSampler
+from .ess import EllipticalSliceSampler
 
 
 class TruncatedMultivariateNormal:

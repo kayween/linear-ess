@@ -3,9 +3,11 @@ import torch
 
 import warnings
 
+from botorch.utils.sampling import find_interior_point
+
 
 class EllipticalSliceSampler(object):
-    def __init__(self, A, b, x, burnin=0):
+    def __init__(self, A, b, x=None, burnin=0):
         """
         Elliptical slice sampler for multivariate standard Gaussian distributions under
         linear inequality constraints A @ x <= b.
@@ -16,6 +18,15 @@ class EllipticalSliceSampler(object):
             x (tensor): The initialization of size (*, d). Has to satisfy all linear inequality constraints.
                 Its first dimension is the batch size, which will be used as the number of independent Markov chains.
         """
+        if x is None:
+            """
+            We use the phase I method to obtain an interior point. The implementation
+            is somewhat tricky, because we need to discuss cases when the linear program
+            is unbounded. Thus, we use BoTorch's implementation to save some efforts.
+            """
+            x = find_interior_point(A.cpu().numpy(), b.cpu().numpy())
+            x = torch.tensor(x).to(b)
+
         if (x @ A.T - b).gt(0.).any():
             raise RuntimeError
 
